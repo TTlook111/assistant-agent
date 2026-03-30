@@ -1,13 +1,18 @@
+import os
 from langchain.agents import create_agent
 from langchain.agents.middleware import HumanInTheLoopMiddleware
 from langchain_community.chat_models import ChatTongyi
 from langchain.tools import tool
 from core.prompts import EMAIL_AGENT_PROMPT
 from tools.email_agent_tools import send_email
+# 加载环境变量
+from dotenv import load_dotenv
+load_dotenv()
 
 email_agent = create_agent(
     model=ChatTongyi(
-        model="qwen3-max"
+        model="qwen3-max",
+        api_key=os.getenv("DASHSCOPE_API_KEY")
     ),
     tools=[send_email],
     system_prompt=EMAIL_AGENT_PROMPT,

@@ -1,3 +1,6 @@
+import os
+# 加载环境变量
+from dotenv import load_dotenv
 from langchain.agents import create_agent
 from langchain.agents.middleware import HumanInTheLoopMiddleware
 from langchain_community.chat_models import ChatTongyi
@@ -5,9 +8,12 @@ from langchain.tools import tool
 from core.prompts import CALENDAR_AGENT_PROMPT
 from tools.calendar_agent_tools import create_calendar_event, get_available_time_slots
 
+load_dotenv()
+
 calendar_agent = create_agent(
     model=ChatTongyi(
         model="qwen3-max",
+        api_key=os.getenv("DASHSCOPE_API_KEY")
     ),
     tools=[create_calendar_event, get_available_time_slots],
     system_prompt=CALENDAR_AGENT_PROMPT,
