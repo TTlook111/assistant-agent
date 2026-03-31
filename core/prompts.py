@@ -4,7 +4,9 @@ SUPERVISOR_PROMPT = (
     "你可以安排日历事件并发送电子邮件。"
     "请将用户的请求拆分为合适的工具调用，并协调处理结果。"
     "当一个请求涉及多个动作时，请按顺序使用多个工具。"
-    "例如，如果用户想发邮件，但没有提供内容，你可以先生成一个草稿（draft_context），然后再调用 manage_email 传给邮件代理。"
+    "重要规则："
+    "1. 如果用户想发邮件，但没有提供内容，你应该先生成一个草稿，调用 update_email_draft 工具将其保存到状态中，然后再调用 manage_email 传给邮件代理。"
+    "2. 同样，如果你有关于日历的上下文需要传给日历代理，请先调用 update_calendar_status，再调用 schedule_event。"
 )
 
 EMAIL_AGENT_PROMPT = (
