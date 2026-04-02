@@ -105,6 +105,7 @@ Agent 思考中...
 
 - 📖 [Agent 的状态与记忆机制详解](./docs/agent_memory_and_state.md)：深入理解 `TypedDict`、`InjectedState` 和 `SqliteSaver` 的工作原理。
 - 📖 [人机协同 (HITL) 深度剖析](./docs/langgraph_human_in_the_loop.md)：拆解如何使用 `GraphInterrupt` 和 `Command(resume=...)` 实现优雅的断点恢复与决策干预。
+- 📖 [通义千问 (Qwen) 结合 LangGraph 的常见踩坑记录](./docs/qwen_tool_message_errors.md)：记录了针对 Qwen API 严格的消息格式校验（如 `ToolMessage` 报错）的修复方案。
 
 ## 📄 许可证
 

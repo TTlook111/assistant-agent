@@ -16,7 +16,8 @@ def main():
     
     # 模拟一个固定的用户 ID，这样即使你重启程序，只要 ID 相同，记忆就会恢复！
     # 在真实项目中，这个可能是数据库里的 user_id
-    thread_id = "test-user-001" 
+    # 注意：因为之前的测试中 SQLite 保存了格式错误的对话历史，所以这里换一个新的 ID 测试。
+    thread_id = "test-user-010" 
     config = {"configurable": {"thread_id": thread_id}}
     
     # 3. 初始化 SQLite Checkpointer (真正的硬盘持久化记忆)
