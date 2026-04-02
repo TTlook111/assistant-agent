@@ -5,6 +5,49 @@
 ## 1. 缺失 ToolMessage 回执
 
 ### 报错信息
+## 5. 多 Agent 架构下终端打印“助理回复为空”的问题
+
+### 现象描述
+在代码跑通、没有报错的情况下，终端可能输出如下内容：
+```text
+你: 给王五发消息，下午三点来找我 
+Agent 思考中... 
+助理: 
+你: 
+```
+
+### 原因分析：消息折叠与 `ToolMessage` 
+在 `main.py` 的简单测试脚本中，原本打印助理回复的代码通常是：
+```python
+print(f"\n助理: {response['messages'][-1].text}")
+```
+在多 Agent 的架构中，如果主 Agent 调用了子 Agent（例如调用了 `manage_email` 工具），并且该工具为了更新状态返回了 `Command` 和 `ToolMessage`。那么当整个图流转结束时，**`messages` 列表中的最后一条消息往往是一个 `ToolMessage`，而不是大模型说的话 (`AIMessage`)**。
+
+`ToolMessage` 的内容存储在 `.content` 属性中，而它的 `.text` 属性通常为空。因此，使用 `.text` 打印就会输出空白。
+
+同时，由于大模型在调用工具时，如果缺少参数（如缺少王五的邮箱地址），它会在生成的工具输入中或者干脆在它自己的 `AIMessage` 中询问，然后工具的执行结果（`ToolMessage`）会被追加到末尾。如果你只打印最后一条，就会漏掉大模型的提问过程。
+
+### 修复方案
+在遍历和打印消息时，需要智能判断消息的类型，如果是 `ToolMessage` 则打印 `.content`，如果是 `AIMessage` 则打印 `.text` 或 `.content`。
+
+**修复后的打印代码示例：**
+```python
+def print_assistant_response(response):
+    """
+    智能地打印助理的回复。
+    如果最后一条消息是 ToolMessage（工具回执），则打印其内容。
+    如果是普通的 AIMessage，则打印其 text 或 content。
+    """
+    last_message = response['messages'][-1]
+    if hasattr(last_message, 'text') and last_message.text:
+        print(f"\n助理: {last_message.text}")
+    else:
+        # 如果是 ToolMessage 或没有 text 属性的消息，打印 content
+        print(f"\n助理 [工具返回]: {last_message.content}")
+
+# 在 invoke 后调用
+response = supervisor_agent.invoke(...)
+print_assistant_response(response)
 ```text
 [错误]: Expected to have a matching ToolMessage in Command.update for tool 'update_email_draft', got: []. Every tool call (LLM requesting to call a tool) in the message history MUST have a corresponding ToolMessage.
 ```
@@ -71,8 +114,51 @@ def update_email_draft(
 在你修复代码**之前**，Agent 已经把那段“残缺/错误的消息历史”保存到了 `checkpoints.sqlite` 数据库中。
 当你修复代码并重新运行程序时，LangGraph 会去数据库里把**那段包含错误格式的历史记录读取出来**，再次原封不动地发给大模型，导致大模型再次拒绝并报错。
 
+## 4. `create_agent` 内部工具返回 Command 时缺失 ToolMessage 响应
+
+### 报错信息
+```text
+[错误]: request_id: 54854b61-6044-96bd-81dc-55529aa4a9bc 
+status_code: 400 
+code: InvalidParameter 
+message: <400> InternalError.Algo.InvalidParameter: An assistant message with "tool_calls" must be followed by tool messages responding to each "tool_call_id". The following tool_call_ids did not have response messages: message[5].role
+```
+
+### 错误原因
+当你使用 LangChain 的 `create_agent` 高阶 API 创建子 Agent（如 `email_agent` 或 `calendar_agent`），并在调用它们的 Tool 函数（如 `manage_email` 或 `schedule_event`）中直接返回业务字符串时，LangChain 框架会**自动**为你包装一个 `ToolMessage` 发送给大模型。
+
+**但是**，一旦你为了更新全局图状态（如 `AgentState`），将 Tool 的返回值**从普通的 `str` 改为了 `Command(update={...})`**，LangChain 就**不再会自动包装工具结果了**！它认为你已经接管了控制流。此时如果你只在 `update` 中修改了业务字段，而**没有手动组装并返回 `ToolMessage`**，大模型在下一轮对话中就会因为找不到与上一轮 `tool_call_id` 匹配的工具回执而报 400 错误。
+
 ### 修复方案
-你有三种选择来开启一段“干净”的对话历史：
-1. **(推荐)** 在 `main.py` 中换一个新的 `thread_id`，例如改为 `"test-user-002"`，开启一个全新的会话。
-2. 直接删除项目根目录下的 `checkpoints.sqlite` 文件，清空所有人的记忆。
-3. （高阶用法）使用 LangGraph 的 `update_state` API 删除/修正数据库里最后那条错误的消息。
+在使用 `Command` 接管状态更新后，**必须手动构造 `ToolMessage`**，并且需要引入 `ToolRuntime` 来获取大模型生成的 `tool_call_id`。
+
+```python
+from langgraph.types import Command
+from langchain.tools import ToolRuntime
+from langchain_core.messages import ToolMessage
+from langgraph.prebuilt import InjectedState
+from typing import Annotated
+
+@tool("manage_email")
+def manage_email(
+    request: str, 
+    runtime: ToolRuntime, # 注入运行时以获取 tool_call_id
+    email_draft: Annotated[str, InjectedState("email_draft")] = ""
+) -> Command: # 注意返回值变成了 Command
+    
+    # 1. 业务逻辑...
+    result = email_agent.invoke(...)
+    
+    # 2. 核心修复：使用 Command 返回时，必须闭环构造 ToolMessage
+    return Command(
+        update={
+            "messages": [
+                ToolMessage(
+                    content=result["messages"][-1].text, # 真正的工具执行结果
+                    name="manage_email", # 必须带上工具名 (Qwen 强制要求)
+                    tool_call_id=runtime.tool_call_id, # 必须原封不动返回大模型给的 ID
+                )
+            ]
+        }
+    )
+```

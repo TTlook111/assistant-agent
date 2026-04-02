@@ -10,6 +10,19 @@ from langgraph.types import Command
 # 2. 导入主代理
 from agent.supervisor_agent import supervisor_agent
 
+def print_assistant_response(response):
+    """
+    智能地打印助理的回复。
+    如果最后一条消息是 ToolMessage（工具回执），则打印其内容。
+    如果是普通的 AIMessage，则打印其 text。
+    """
+    last_message = response['messages'][-1]
+    if hasattr(last_message, 'text') and last_message.text:
+        print(f"\n助理: {last_message.text}")
+    else:
+        # 如果是 ToolMessage 或没有 text 属性的消息，打印 content
+        print(f"\n助理 [工具返回]: {last_message.content}")
+
 def main():
     print("🤖 个人助理 Agent 已启动！(输入 'exit' 退出)")
     print("-" * 50)
@@ -17,7 +30,7 @@ def main():
     # 模拟一个固定的用户 ID，这样即使你重启程序，只要 ID 相同，记忆就会恢复！
     # 在真实项目中，这个可能是数据库里的 user_id
     # 注意：因为之前的测试中 SQLite 保存了格式错误的对话历史，所以这里换一个新的 ID 测试。
-    thread_id = "test-user-010" 
+    thread_id = "test-user-013" 
     config = {"configurable": {"thread_id": thread_id}}
     
     # 3. 初始化 SQLite Checkpointer (真正的硬盘持久化记忆)
@@ -51,7 +64,7 @@ def main():
                 {"messages": [{"role": "user", "content": user_input}]},
                 config=config
             )
-            print(f"\n助理: {response['messages'][-1].text}")
+            print_assistant_response(response)
             
         except GraphInterrupt as e:
             # 捕获到中断异常！说明某个子代理触发了 HumanInTheLoopMiddleware
@@ -78,7 +91,7 @@ def main():
                     version="v2"
                 )
                 resume_response = supervisor_agent.invoke(resume_command, config=config)
-                print(f"\n助理: {resume_response['messages'][-1].text}")
+                print_assistant_response(resume_response)
             elif user_approval.lower() == 'e':
                 # 这里我们模拟一个编辑的场景（实际项目中，这通常是一个前端表单）
                 print("进入编辑模式...")
@@ -103,7 +116,7 @@ def main():
                     version="v2"
                 )
                 resume_response = supervisor_agent.invoke(edit_command, config=config)
-                print(f"\n助理: {resume_response['messages'][-1].text}")
+                print_assistant_response(resume_response)
             else:
                 print("操作已取消，通知 Agent...")
                 # 如果拒绝，同样使用 Command 对象，告知底层图引擎取消执行。
@@ -119,7 +132,7 @@ def main():
                     version="v2"
                 )
                 resume_response = supervisor_agent.invoke(reject_command, config=config)
-                print(f"\n助理: {resume_response['messages'][-1].text}")
+                print_assistant_response(resume_response)
                 
         except Exception as e:
             print(f"\n[错误]: {str(e)}")

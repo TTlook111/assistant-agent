@@ -3,6 +3,7 @@ from langchain.agents import create_agent
 from langchain.agents.middleware import HumanInTheLoopMiddleware
 from langchain_community.chat_models import ChatTongyi
 from langchain.tools import tool
+from langchain_core.messages import ToolMessage
 from typing import Annotated
 from langgraph.prebuilt import InjectedState
 
@@ -26,6 +27,9 @@ calendar_agent = create_agent(
     ],
 )
 
+from langgraph.types import Command
+from langchain.tools import ToolRuntime
+
 @tool("schedule_event", description=(
     "使用自然语言安排日历事件。\n"
     "当用户想要创建、修改或查看日历预约时使用此工具。\n"
@@ -34,9 +38,10 @@ calendar_agent = create_agent(
 ))
 def schedule_event(
     request: str,
+    runtime: ToolRuntime,
     # 同样使用依赖注入，让主 Agent 可以传递日历相关的上下文 (对应 core.state.py 中的 calendar_status)
     calendar_status: Annotated[str, InjectedState("calendar_status")] = ""
-) -> str:
+) -> Command:
     full_request = request
     if calendar_status:
         full_request += f"\n\n【主Agent补充的日历状态/上下文】：\n{calendar_status}"
@@ -44,4 +49,16 @@ def schedule_event(
     result = calendar_agent.invoke({
         "messages": [{"role": "user", "content": full_request}]
     })
-    return result["messages"][-1].text
+    
+    # 核心修复：使用 Command 返回并闭环构造 ToolMessage
+    return Command(
+        update={
+            "messages": [
+                ToolMessage(
+                    content=result["messages"][-1].text,
+                    name="schedule_event",
+                    tool_call_id=runtime.tool_call_id,
+                )
+            ]
+        }
+    )
