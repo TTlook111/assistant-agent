@@ -242,6 +242,8 @@ class AgentState(TypedDict):
    - 当任务流转到 `Calendar Agent` 节点时，它读取 `messages`，处理完后，只修改 `calendar_status` 字段，然后把公文包传回给主 Agent。
    - 当任务流转到 `Email Agent` 时，它无视 `calendar_status`，只处理自己关心的 `email_draft` 字段。
 
+**核心机制：** `InjectedState` 里能填什么字符串，完全取决于你在创建主 Agent（图的入口）时，传给它的 `state_schema`（即契约）是什么。如果在 `AgentState` 里没有定义 `user_age`，那么在工具里写 `InjectedState("user_age")` 就会导致注入失败。
+
 这种设计类似于前端开发中的 Redux 或 Vuex 状态管理模式：**单一数据源 (Single Source of Truth)**，但各个组件（Agent）各取所需。
 
 ---
@@ -268,9 +270,10 @@ class AgentState(TypedDict):
 ### 5.2 高阶 `create_agent` 模式：`Runtime` 与 Middleware
 **适用场景**：如果你使用的是 LangChain 最新推出的高阶封装 API `langchain.agents.create_agent`（它底层包裹了 LangGraph），你才会用到以下对象：
 
-1. **`ToolRuntime` (在 `@tool` 内部)**：
-   - **何时使用**：当工具不仅需要业务数据，还需要**框架底层的运行上下文**时使用。
-   - **典型用法**：正如你之前遇到的 400 错误，如果工具需要返回 `Command` 并手动组装 `ToolMessage`，就必须通过 `runtime.tool_call_id` 获取大模型生成的 ID；或者当工具需要访问跨会话的长期记忆存储 (`runtime.store`) 时。
+1. **获取 `tool_call_id` 的两种方式：`InjectedToolCallId` vs `ToolRuntime`**：
+   在需要手动构造 `ToolMessage` 闭环时，我们需要大模型生成的 ID。LangChain 提供了两种注入方式：
+   - **方式 A (推荐)：`tool_call_id: Annotated[str, InjectedToolCallId]`**。这是一种更现代、更纯粹的依赖注入方式（类似于 `InjectedState`）。如果你**仅仅只需要**拿到这个 ID 字符串，这是最佳选择，代码类型非常清晰。
+   - **方式 B：`runtime: ToolRuntime`**。注入整个运行时对象，然后通过 `runtime.tool_call_id` 获取。如果你不仅需要 ID，还需要访问跨会话的长期记忆存储 (`runtime.store`) 或配置上下文 (`runtime.context`)，则必须使用这种方式。两者在获取 ID 这一目的上是等价的。
 
 2. **`@dynamic_prompt` 与 `ModelRequest`**：
    - **何时使用**：专门用于 `create_agent` 的中间件。在请求真正发给大模型（LLM）的前一刻，用来**动态修改系统提示词**。比如根据 `request.runtime.context.user_name` 动态把提示词改为“你好，张三”。
@@ -279,9 +282,9 @@ class AgentState(TypedDict):
    - **何时使用**：也是 `create_agent` 的中间件钩子。用于在调用大模型前后进行拦截。比如记录日志、审计，或者在调用模型前强制检查/修改当前图的 `AgentState` 和 `Runtime` 上下文。
 
 **总结与选型建议**：
-- 如果你只是想在 Tool 里读取图里的一个业务变量（如草稿、会议地点），**毫不犹豫地使用 `InjectedState`**。
-- 如果你需要在 Tool 里实现复杂的控制流（如手动构造消息闭环、Handoff 路由），必须拿到系统级的 `tool_call_id`，**使用 `ToolRuntime`**。
-- 只有在你使用了高阶的 `create_agent` 并希望在全局层面拦截请求、动态修改提示词时，才去研究 `@before_model` 和 `@dynamic_prompt` 中间件。
+- 如果你想在 Tool 里读取业务变量（如草稿），用 **`InjectedState`**。
+- 如果你想在 Tool 里拿到调用 ID 来构造消息，优先用 **`InjectedToolCallId`**；如果还需要操作底层存储/上下文，用 **`ToolRuntime`**。
+- 只有在需要全局拦截请求、动态修改提示词时，才去研究中间件钩子。
 
 ---
 
