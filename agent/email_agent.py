@@ -3,6 +3,7 @@ from langchain.agents import create_agent
 from langchain.agents.middleware import HumanInTheLoopMiddleware
 from langchain_community.chat_models import ChatTongyi
 from langchain.tools import tool
+from langchain_core.messages import ToolMessage
 from typing import Annotated
 from langgraph.prebuilt import InjectedState
 
@@ -28,6 +29,9 @@ email_agent = create_agent(
 
 # 注意这里：我们使用了 InjectedState 魔法！
 # 告诉框架从全局 State 中提取 email_draft（与 core.state.py 里的字段对应），大模型完全感知不到这个参数。
+from langgraph.types import Command
+from langchain.tools import ToolRuntime
+
 @tool("manage_email", description=(
     "使用自然语言发送电子邮件。\n"
     "当用户想要发送通知、提醒或任何电子邮件通信时使用此工具。\n"
@@ -36,9 +40,10 @@ email_agent = create_agent(
 ))
 def manage_email(
     request: str, 
+    runtime: ToolRuntime,
     # 依赖注入：大模型不需要生成这个参数，框架会自动把 state 里的 email_draft 塞进来
     email_draft: Annotated[str, InjectedState("email_draft")] = ""
-) -> str:
+) -> Command:
     # 这一步，我们把主代理通过 State 传来的“草稿状态”拼接到了用户的请求里，
     # 这就是在模拟“State”在不同 Agent 之间的流转，且无需传递完整的历史消息。
     full_request = request
@@ -48,4 +53,16 @@ def manage_email(
     result = email_agent.invoke({
         "messages": [{"role": "user", "content": full_request}]
     })
-    return result["messages"][-1].text
+    
+    # 核心修复：使用 Command 返回并闭环构造 ToolMessage
+    return Command(
+        update={
+            "messages": [
+                ToolMessage(
+                    content=result["messages"][-1].text,
+                    name="manage_email",
+                    tool_call_id=runtime.tool_call_id,
+                )
+            ]
+        }
+    )
