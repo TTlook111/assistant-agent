@@ -1,5 +1,7 @@
 import json
 import os
+import shutil
+import tempfile
 from langchain.tools import tool
 from typing import List
 
@@ -7,15 +9,31 @@ CALENDAR_DB_FILE = "calendar_db.json"
 
 def _load_events():
     if os.path.exists(CALENDAR_DB_FILE):
-        with open(CALENDAR_DB_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
+        try:
+            with open(CALENDAR_DB_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except (json.JSONDecodeError, IOError) as e:
+            print(f"[Calendar Tool Error] 无法读取或解析现有的 {CALENDAR_DB_FILE}: {e}")
+            return []
     return []
 
 def _save_event(event):
     events = _load_events()
     events.append(event)
-    with open(CALENDAR_DB_FILE, "w", encoding="utf-8") as f:
-        json.dump(events, f, ensure_ascii=False, indent=4)
+    
+    # 使用原子写入：先写入临时文件，再替换原文件
+    try:
+        fd, temp_path = tempfile.mkstemp(dir=os.path.dirname(os.path.abspath(CALENDAR_DB_FILE)), suffix=".tmp")
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(events, f, ensure_ascii=False, indent=4)
+        shutil.move(temp_path, CALENDAR_DB_FILE)
+    except IOError as e:
+        print(f"[Calendar Tool Error] 无法将日历事件写入 {CALENDAR_DB_FILE}: {e}")
+        if 'temp_path' in locals() and os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except OSError:
+                pass
 
 @tool("create_calendar_event")
 def create_calendar_event(
